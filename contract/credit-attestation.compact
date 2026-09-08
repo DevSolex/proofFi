@@ -1,0 +1,215 @@
+pragma language_version >= 0.21.0;
+
+import CompactStandardLibrary;
+
+// ────────────────────────────────────────────────────────────────────────────
+// Types
+// ────────────────────────────────────────────────────────────────────────────
+
+// Tier is encoded as Uint<8>:  0=NONE  1=BRONZE  2=SILVER  3=GOLD
+// Enums are avoided for the tier comparison in verifyAttestation because
+// Compact enum >= comparison behaves as integer comparison on the ordinal
+// but has caused toolchain-version inconsistencies in practice.  Uint<8>
+// is unambiguous.  The TypeScript display layer maps 0-3 to names.
+
+struct BalancePayload {
+  walletCommitment: Bytes<32>,
+  avgBalance:       Uint<64>,
+  issuedAt:         Uint<64>,
+  issuerKeyId:      Bytes<32>
+}
+
+struct Attestation {
+  tier:     Uint<8>,    // 0=NONE 1=BRONZE 2=SILVER 3=GOLD
+  issuer:   Bytes<32>,
+  issuedAt: Uint<64>
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Ledger declarations
+// ────────────────────────────────────────────────────────────────────────────
+
+// adminCommitment: persistentHash of the admin's secret key.
+// Used for commit/reveal admin authentication — NOT ownPublicKey().
+// See §4.6 and docs/known-limitations.md for the security rationale.
+export ledger adminCommitment: Bytes<32>;
+
+// trustedIssuers: issuerKeyId -> Boolean (true=active, false=revoked)
+export ledger trustedIssuers: Map<Bytes<32>, Boolean>;
+
+// Tier thresholds stored as three separate Uint<64> fields.
+// Compact does not support fixed-size Uint<64> arrays in the ledger
+// in a stable way across toolchain versions.
+export ledger bronzeMin: Uint<64>;
+export ledger silverMin: Uint<64>;
+export ledger goldMin:   Uint<64>;
+
+// attestations: commitment -> Attestation  (raw balance NEVER stored here)
+export ledger attestations: Map<Bytes<32>, Attestation>;
+
+// attestationCount: total number of attestations ever issued
+export ledger attestationCount: Counter;
+
+// ────────────────────────────────────────────────────────────────────────────
+// Constructor
+// ────────────────────────────────────────────────────────────────────────────
+
+constructor(
+  adminSecretCommitment: Bytes<32>,  // persistentHash(adminSecret) — computed off-chain
+  initialIssuer:         Bytes<32>,  // first trusted issuer key id
+  _bronzeMin:            Uint<64>,
+  _silverMin:            Uint<64>,
+  _goldMin:              Uint<64>
+) {
+  adminCommitment = disclose(adminSecretCommitment);
+  trustedIssuers.insert(disclose(initialIssuer), disclose(true));
+  bronzeMin = disclose(_bronzeMin);
+  silverMin = disclose(_silverMin);
+  goldMin   = disclose(_goldMin);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Witnesses
+// ────────────────────────────────────────────────────────────────────────────
+
+// Returns the signed balance payload and the issuer's 64-byte signature.
+//
+// VARIANT B IMPLEMENTATION: the TypeScript witness verifies the secp256k1
+// signature over the payload before returning.  If verification fails or
+// if the issuer is not in the local trusted list, the witness throws —
+// the circuit never receives a fraudulent payload.
+//
+// The circuit still asserts trustedIssuers membership as a second layer
+// (the on-chain Map is the authoritative source).
+witness getSignedBalancePayload(): [BalancePayload, Bytes<64>];
+
+// Returns the caller's private wallet secret used to derive the commitment.
+// The secret must never be derivable from on-chain state; if it were,
+// the unlinkability property (no link between commitment and identity) is void.
+witness getWalletSecret(): Bytes<32>;
+
+// Returns the admin's private secret for admin-gated operations.
+// Used in registerIssuer / revokeIssuer for commit/reveal auth.
+witness getAdminSecret(): Bytes<32>;
+
+// ────────────────────────────────────────────────────────────────────────────
+// Internal circuit: computeTier
+// ────────────────────────────────────────────────────────────────────────────
+
+circuit computeTier(balance: Uint<64>): Uint<8> {
+  if (disclose(balance >= goldMin))   { return 3; }  // GOLD
+  if (disclose(balance >= silverMin)) { return 2; }  // SILVER
+  if (disclose(balance >= bronzeMin)) { return 1; }  // BRONZE
+  return 0;                                           // NONE
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Circuit: issueAttestation
+// ────────────────────────────────────────────────────────────────────────────
+//
+// VARIANT B: signature verification happens in the TypeScript witness.
+// The circuit enforces: (a) on-chain issuer trust, (b) payload freshness,
+// (c) only tier+commitment+metadata hit the ledger — raw balance is never
+// disclosed.
+//
+// MAX_STALENESS = 86400 seconds (24 hours).  blockTimeLt(issuedAt + 86400)
+// asserts that the current block time is before the expiry boundary.
+
+export circuit issueAttestation(): [] {
+  // 1. Fetch payload; TS witness has already verified the signature.
+  const [payload, _sig] = getSignedBalancePayload();
+
+  // 2. On-chain issuer trust check (two parts: present AND not revoked)
+  const issuerKeyId: Bytes<32> = disclose(payload.issuerKeyId);
+  assert(
+    trustedIssuers.member(issuerKeyId),
+    "untrusted issuer"
+  );
+  assert(
+    trustedIssuers.lookup(issuerKeyId),
+    "issuer revoked"
+  );
+
+  // 3. Freshness: block_time < issuedAt + 86400 (24-hour window)
+  // We must cast the sum back to Uint<64> to match blockTimeLt's argument type,
+  // since addition of Uint<64> + literal widens the type in Compact's type system.
+  const expiryTimestamp: Uint<64> = (payload.issuedAt + 86400) as Uint<64>;
+  assert(
+    blockTimeLt(disclose(expiryTimestamp)),
+    "stale attestation"
+  );
+
+  // 4. Compute tier from private balance — result is Uint<8>, not a balance
+  const tier = computeTier(payload.avgBalance);
+
+  // 5. Derive wallet commitment from private secret (never disclosed)
+  const secret = getWalletSecret();
+  const commitment = persistentHash<Bytes<32>>(secret);
+
+  // 6. Write attestation.  Only tier, issuer id, and timestamp are public.
+  //    avgBalance does NOT appear anywhere in this ledger write.
+  attestations.insert(
+    disclose(commitment),
+    disclose(Attestation {
+      tier:     tier,
+      issuer:   payload.issuerKeyId,
+      issuedAt: payload.issuedAt
+    })
+  );
+  attestationCount.increment(1);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Circuit: verifyAttestation
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Returns true if the attestation for `commitment` has tier >= minTier.
+// Returns false (not a crash) when the commitment has never been attested.
+
+export circuit verifyAttestation(commitment: Bytes<32>, minTier: Uint<8>): Boolean {
+  const disclosedCommitment: Bytes<32> = disclose(commitment);
+  if (!attestations.member(disclosedCommitment)) {
+    return false;
+  }
+  const record = attestations.lookup(disclosedCommitment);
+  return disclose(record.tier >= minTier);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Circuit: registerIssuer (admin-only)
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Admin authentication: commit/reveal over adminCommitment.
+// The witness supplies the admin secret; the circuit constrains
+// persistentHash(secret) == adminCommitment.  An attacker who does not
+// know the secret cannot satisfy this constraint and cannot generate a
+// valid proof.  ownPublicKey() is NOT used (documented Midnight pitfall).
+
+export circuit registerIssuer(issuerKeyId: Bytes<32>): [] {
+  const secret           = getAdminSecret();
+  const derivedCommitment = persistentHash<Bytes<32>>(secret);
+  assert(
+    disclose(derivedCommitment == adminCommitment),
+    "not admin"
+  );
+  trustedIssuers.insert(disclose(issuerKeyId), disclose(true));
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Circuit: revokeIssuer (admin-only)
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Sets trustedIssuers[issuerKeyId] = false.
+// NOTE: does NOT retroactively invalidate attestations already issued
+// under this key.  This is an explicit Wave 1 non-goal; see README and
+// docs/known-limitations.md.
+
+export circuit revokeIssuer(issuerKeyId: Bytes<32>): [] {
+  const secret           = getAdminSecret();
+  const derivedCommitment = persistentHash<Bytes<32>>(secret);
+  assert(
+    disclose(derivedCommitment == adminCommitment),
+    "not admin"
+  );
+  trustedIssuers.insert(disclose(issuerKeyId), disclose(false));
+}
