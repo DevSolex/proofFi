@@ -8,8 +8,8 @@
     "test:watch": "vitest",
     "smoke-test": "npx tsx tests/smoke-test.ts",
     "issuer:generate": "npx tsx issuer-service/index.ts generate",
-    "compile": "compact --skip-zk contract/credit-attestation.compact contract/managed/credit-attestation",
-    "compile:full": "compact contract/credit-attestation.compact contract/managed/credit-attestation"
+    "compile": "compact compile --skip-zk contract/credit-attestation.compact contract/managed/credit-attestation",
+    "compile:full": "compact compile contract/credit-attestation.compact contract/managed/credit-attestation"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
