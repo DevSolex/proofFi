@@ -16,7 +16,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { secp256k1 } from '@noble/curves/secp256k1';
 import { sha256 } from '@noble/hashes/sha256';
-import { createHash } from 'node:crypto';
 import {
   issuePayload,
   encodePayload,
@@ -202,72 +201,198 @@ describe('payload encoding', () => {
 
 // ─── Admin auth replay tests (issue #4) ──────────────────────────────────────
 //
-// The commit/reveal admin auth scheme uses persistentHash(secret) == adminCommitment.
-// Replay safety analysis:
+// These tests call the ACTUAL compiled contract circuits (registerIssuer,
+// revokeIssuer) using the compact-runtime local simulation API.  They confirm:
 //
-//   - Witness values (adminSecret) are NEVER published on-chain in Midnight's ZK
-//     model — they exist only inside the locally-generated proof.  An on-chain
-//     observer cannot recover the secret from the transaction record.
+//   (a) Correct admin secret → registerIssuer succeeds, trustedIssuers updated
+//   (b) Wrong secret → registerIssuer rejected by the circuit assert
+//   (c) Same secret replayed on a second call → idempotent success (safe)
+//   (d) revokeIssuer with correct secret → flips trustedIssuers entry to false
+//   (e) revokeIssuer with wrong secret → rejected
 //
-//   - Submitting the same registerIssuer/revokeIssuer call twice with the same
-//     secret is IDEMPOTENT: Map.insert overwrites with the same value — harmless.
-//
-//   - The real threat is off-chain secret compromise, not on-chain extraction.
-//
-// These tests confirm:
-//   (a) The same secret satisfies the commitment check on repeated calls (idempotent).
-//   (b) A DIFFERENT secret that doesn't match the commitment is rejected.
+// Replay safety analysis (documented in docs/known-limitations.md §4):
+//   Witness values (adminSecret) are NEVER published on-chain in Midnight's ZK
+//   model.  Replaying the same admin call with the same secret is idempotent —
+//   Map.insert overwrites with the same value, which is harmless.
 
-describe('admin auth: commit/reveal replay and rejection behaviour', () => {
-  // Simulate the circuit's admin check: persistentHash(secret) == storedCommitment
-  // Using sha256 as the persistentHash stand-in (same as smoke-test and witness layer)
+import {
+  Contract,
+  ledger,
+} from '../contract/managed/credit-attestation/contract/index.js';
+import {
+  createConstructorContext,
+  createCircuitContext,
+  dummyContractAddress,
+  sampleSigningKey,
+  signatureVerifyingKey,
+} from '@midnight-ntwrk/compact-runtime';
+
+describe('admin auth: real contract circuit tests (registerIssuer / revokeIssuer)', () => {
+  // ── helpers ────────────────────────────────────────────────────────────────
+
   function persistentHash(secret: Uint8Array): Uint8Array {
-    return new Uint8Array(createHash('sha256').update(secret).digest());
+    // Mirrors the in-circuit persistentHash<Bytes<32>>(secret) behaviour.
+    // CompactStandardLibrary persistentHash uses sha256 over the encoded value.
+    return sha256(secret);
   }
 
-  function simulateAdminCheck(secret: Uint8Array, storedCommitment: Uint8Array): boolean {
-    const derived = persistentHash(secret);
-    return Buffer.from(derived).toString('hex') === Buffer.from(storedCommitment).toString('hex');
+  function makeWitnesses(adminSecret: Uint8Array) {
+    return {
+      getSignedBalancePayload: (_ctx: any) => {
+        throw new Error('not used in admin tests');
+      },
+      getWalletSecret: (_ctx: any) => [_ctx.privateState, new Uint8Array(32)],
+      getAdminSecret: (ctx: any) => [ctx.privateState, adminSecret],
+    };
   }
 
-  let localAdminSecret: Uint8Array;
-  let adminCommitment: Uint8Array;
+  async function deployContract(adminSecret: Uint8Array, initialIssuer: Uint8Array) {
+    const signingKey   = sampleSigningKey();
+    const coinPubKey   = signatureVerifyingKey(signingKey);
+    const adminCommit  = persistentHash(adminSecret);
+
+    const contract    = new Contract(makeWitnesses(adminSecret));
+    const ctorCtx     = createConstructorContext(null, coinPubKey);
+    const { currentContractState } = await contract.initialState(
+      ctorCtx,
+      adminCommit,
+      initialIssuer,
+      1_000n,   // bronzeMin
+      5_000n,   // silverMin
+      20_000n,  // goldMin
+    );
+    return { contract, currentContractState, coinPubKey };
+  }
+
+  function makeCircuitCtx(
+    contract: Contract,
+    coinPubKey: any,
+    contractState: any,
+    adminSecret: Uint8Array,
+  ) {
+    const ctx = createCircuitContext(
+      'registerIssuer',
+      dummyContractAddress(),
+      coinPubKey,
+      contractState.data,
+      null,
+    );
+    // Override witnesses with correct adminSecret for this call
+    (contract as any).witnesses = makeWitnesses(adminSecret);
+    return ctx;
+  }
+
+  // ── tests ──────────────────────────────────────────────────────────────────
+
+  let correctAdminSecret: Uint8Array;
+  let wrongAdminSecret:   Uint8Array;
+  let initialIssuer:      Uint8Array;
+  let newIssuer:          Uint8Array;
 
   beforeAll(() => {
-    localAdminSecret = crypto.getRandomValues(new Uint8Array(32));
-    adminCommitment  = persistentHash(localAdminSecret);
+    correctAdminSecret = crypto.getRandomValues(new Uint8Array(32));
+    wrongAdminSecret   = crypto.getRandomValues(new Uint8Array(32));
+    initialIssuer      = crypto.getRandomValues(new Uint8Array(32));
+    newIssuer          = crypto.getRandomValues(new Uint8Array(32));
   });
 
-  it('same secret satisfies commitment check on first call', () => {
-    expect(simulateAdminCheck(localAdminSecret, adminCommitment)).toBe(true);
+  it('deploys contract with correct adminCommitment and initialIssuer in trustedIssuers', async () => {
+    const { currentContractState, } = await deployContract(correctAdminSecret, initialIssuer);
+    const state = ledger(currentContractState.data);
+    expect(state.trustedIssuers.member(initialIssuer)).toBe(true);
+    expect(state.trustedIssuers.lookup(initialIssuer)).toBe(true);
   });
 
-  it('same secret satisfies commitment check on a second (replayed) call — idempotent, not a security breach', () => {
-    // Replay: submitting the same admin operation twice.
-    // Result: passes — the circuit is satisfied again with the same secret.
-    // This is safe because the operation (insert key=true) is idempotent.
-    expect(simulateAdminCheck(localAdminSecret, adminCommitment)).toBe(true);
+  it('registerIssuer succeeds with correct admin secret and adds issuer to trustedIssuers', async () => {
+    const { contract, currentContractState, coinPubKey } =
+      await deployContract(correctAdminSecret, initialIssuer);
+
+    const ctx = createCircuitContext(
+      'registerIssuer',
+      dummyContractAddress(),
+      coinPubKey,
+      currentContractState.data,
+      null,
+    );
+    const result = await contract.circuits.registerIssuer(ctx, newIssuer);
+    // Updated ledger state lives in result.context.callContext.currentQueryContext.state
+    const state  = ledger(result.context.callContext.currentQueryContext.state);
+
+    expect(state.trustedIssuers.member(newIssuer)).toBe(true);
+    expect(state.trustedIssuers.lookup(newIssuer)).toBe(true);
   });
 
-  it('wrong secret is rejected — attacker without the preimage cannot satisfy the constraint', () => {
-    const wrongSecret = crypto.getRandomValues(new Uint8Array(32));
-    // With overwhelming probability, a random 32-byte secret won't hash to the same commitment
-    expect(simulateAdminCheck(wrongSecret, adminCommitment)).toBe(false);
+  it('registerIssuer with WRONG admin secret is rejected by the circuit assert', async () => {
+    const { currentContractState, coinPubKey } =
+      await deployContract(correctAdminSecret, initialIssuer);
+
+    const wrongWitnessContract = new Contract(makeWitnesses(wrongAdminSecret));
+
+    const ctx = createCircuitContext(
+      'registerIssuer',
+      dummyContractAddress(),
+      coinPubKey,
+      currentContractState.data,
+      null,
+    );
+
+    await expect(
+      wrongWitnessContract.circuits.registerIssuer(ctx, newIssuer)
+    ).rejects.toThrow(/not admin/);
   });
 
-  it('mutated secret (one byte flipped) is rejected', () => {
-    const mutated = new Uint8Array(localAdminSecret);
-    mutated[0] ^= 0xff;
-    expect(simulateAdminCheck(mutated, adminCommitment)).toBe(false);
+  it('registerIssuer replayed with same secret is idempotent (safe — not a breach)', async () => {
+    const { contract, currentContractState, coinPubKey } =
+      await deployContract(correctAdminSecret, initialIssuer);
+
+    const ctx1 = createCircuitContext(
+      'registerIssuer', dummyContractAddress(), coinPubKey,
+      currentContractState.data, null,
+    );
+    const result1 = await contract.circuits.registerIssuer(ctx1, newIssuer);
+
+    // Replay: same secret, same issuer key — should succeed (idempotent)
+    const ctx2 = createCircuitContext(
+      'registerIssuer', dummyContractAddress(), coinPubKey,
+      result1.context.callContext.currentQueryContext.state, null,
+    );
+    const result2 = await contract.circuits.registerIssuer(ctx2, newIssuer);
+    const state   = ledger(result2.context.callContext.currentQueryContext.state);
+
+    // Still active after replay — Map.insert overwrites with same value
+    expect(state.trustedIssuers.member(newIssuer)).toBe(true);
+    expect(state.trustedIssuers.lookup(newIssuer)).toBe(true);
   });
 
-  it('commitment is not reversible — cannot recover secret from stored commitment', () => {
-    // The adminCommitment stored on-chain is a sha256 hash.
-    // This test documents that the commitment value itself reveals nothing about
-    // the secret — the hex of the commitment does not contain the secret bytes.
-    const secretHex = Buffer.from(localAdminSecret).toString('hex');
-    const commitHex = Buffer.from(adminCommitment).toString('hex');
-    expect(commitHex).not.toBe(secretHex);
-    expect(commitHex).not.toContain(secretHex.slice(0, 16)); // no partial match
+  it('revokeIssuer with correct admin secret sets trustedIssuers entry to false', async () => {
+    const { contract, currentContractState, coinPubKey } =
+      await deployContract(correctAdminSecret, initialIssuer);
+
+    const ctx = createCircuitContext(
+      'revokeIssuer', dummyContractAddress(), coinPubKey,
+      currentContractState.data, null,
+    );
+    const result = await contract.circuits.revokeIssuer(ctx, initialIssuer);
+    const state  = ledger(result.context.callContext.currentQueryContext.state);
+
+    // Key still present in map, but value is false
+    expect(state.trustedIssuers.member(initialIssuer)).toBe(true);
+    expect(state.trustedIssuers.lookup(initialIssuer)).toBe(false);
+  });
+
+  it('revokeIssuer with WRONG admin secret is rejected by the circuit assert', async () => {
+    const { currentContractState, coinPubKey } =
+      await deployContract(correctAdminSecret, initialIssuer);
+
+    const wrongWitnessContract = new Contract(makeWitnesses(wrongAdminSecret));
+
+    const ctx = createCircuitContext(
+      'revokeIssuer', dummyContractAddress(), coinPubKey,
+      currentContractState.data, null,
+    );
+
+    await expect(
+      wrongWitnessContract.circuits.revokeIssuer(ctx, initialIssuer)
+    ).rejects.toThrow(/not admin/);
   });
 });
