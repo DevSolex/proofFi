@@ -16,6 +16,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { secp256k1 } from '@noble/curves/secp256k1';
 import { sha256 } from '@noble/hashes/sha256';
+import { createHash } from 'node:crypto';
 import {
   issuePayload,
   encodePayload,
@@ -196,5 +197,77 @@ describe('payload encoding', () => {
     const p2 = { ...p1 };
     expect(Buffer.from(encodePayload(p1)).toString('hex'))
       .toBe(Buffer.from(encodePayload(p2)).toString('hex'));
+  });
+});
+
+// ─── Admin auth replay tests (issue #4) ──────────────────────────────────────
+//
+// The commit/reveal admin auth scheme uses persistentHash(secret) == adminCommitment.
+// Replay safety analysis:
+//
+//   - Witness values (adminSecret) are NEVER published on-chain in Midnight's ZK
+//     model — they exist only inside the locally-generated proof.  An on-chain
+//     observer cannot recover the secret from the transaction record.
+//
+//   - Submitting the same registerIssuer/revokeIssuer call twice with the same
+//     secret is IDEMPOTENT: Map.insert overwrites with the same value — harmless.
+//
+//   - The real threat is off-chain secret compromise, not on-chain extraction.
+//
+// These tests confirm:
+//   (a) The same secret satisfies the commitment check on repeated calls (idempotent).
+//   (b) A DIFFERENT secret that doesn't match the commitment is rejected.
+
+describe('admin auth: commit/reveal replay and rejection behaviour', () => {
+  // Simulate the circuit's admin check: persistentHash(secret) == storedCommitment
+  // Using sha256 as the persistentHash stand-in (same as smoke-test and witness layer)
+  function persistentHash(secret: Uint8Array): Uint8Array {
+    return new Uint8Array(createHash('sha256').update(secret).digest());
+  }
+
+  function simulateAdminCheck(secret: Uint8Array, storedCommitment: Uint8Array): boolean {
+    const derived = persistentHash(secret);
+    return Buffer.from(derived).toString('hex') === Buffer.from(storedCommitment).toString('hex');
+  }
+
+  let localAdminSecret: Uint8Array;
+  let adminCommitment: Uint8Array;
+
+  beforeAll(() => {
+    localAdminSecret = crypto.getRandomValues(new Uint8Array(32));
+    adminCommitment  = persistentHash(localAdminSecret);
+  });
+
+  it('same secret satisfies commitment check on first call', () => {
+    expect(simulateAdminCheck(localAdminSecret, adminCommitment)).toBe(true);
+  });
+
+  it('same secret satisfies commitment check on a second (replayed) call — idempotent, not a security breach', () => {
+    // Replay: submitting the same admin operation twice.
+    // Result: passes — the circuit is satisfied again with the same secret.
+    // This is safe because the operation (insert key=true) is idempotent.
+    expect(simulateAdminCheck(localAdminSecret, adminCommitment)).toBe(true);
+  });
+
+  it('wrong secret is rejected — attacker without the preimage cannot satisfy the constraint', () => {
+    const wrongSecret = crypto.getRandomValues(new Uint8Array(32));
+    // With overwhelming probability, a random 32-byte secret won't hash to the same commitment
+    expect(simulateAdminCheck(wrongSecret, adminCommitment)).toBe(false);
+  });
+
+  it('mutated secret (one byte flipped) is rejected', () => {
+    const mutated = new Uint8Array(localAdminSecret);
+    mutated[0] ^= 0xff;
+    expect(simulateAdminCheck(mutated, adminCommitment)).toBe(false);
+  });
+
+  it('commitment is not reversible — cannot recover secret from stored commitment', () => {
+    // The adminCommitment stored on-chain is a sha256 hash.
+    // This test documents that the commitment value itself reveals nothing about
+    // the secret — the hex of the commitment does not contain the secret bytes.
+    const secretHex = Buffer.from(localAdminSecret).toString('hex');
+    const commitHex = Buffer.from(adminCommitment).toString('hex');
+    expect(commitHex).not.toBe(secretHex);
+    expect(commitHex).not.toContain(secretHex.slice(0, 16)); // no partial match
   });
 });

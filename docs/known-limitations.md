@@ -72,11 +72,25 @@ is unconstrained by the ZK circuit — the prover supplies it without any
 protocol-level verification.  A documented Midnight pitfall.  See the security
 best practices page on docs.midnight.network for details.
 
-**Residual limitation:** if the admin secret is compromised (e.g., leaked from
-the wallet that holds it), an attacker can call `registerIssuer` with their own
-key and begin issuing valid attestations.  There is no on-chain mechanism to
-change the admin commitment after deploy in Wave 1.  An `updateAdmin` circuit
-is a Wave 2 item.
+**Replay safety:** the commit/reveal scheme as implemented is replay-safe by
+the ZK architecture of Midnight.  Witness values (including `adminSecret`) are
+private inputs to the ZK circuit and are **never published on-chain** — they
+exist only in the locally-generated proof.  The network verifies the proof
+without ever seeing the underlying secret.  A replayer observing the blockchain
+sees only the proof and the public ledger changes (`trustedIssuers` update);
+the `adminSecret` preimage is not recoverable from any on-chain data.
+
+Concretely: replaying a `registerIssuer` call with the same inputs is
+*idempotent* (the same issuer is written as `true` again), which is harmless.
+The replay risk is not "attacker learns the secret from the chain" but rather
+"the same operation is submitted twice" — the contract handles this gracefully
+since `Map.insert` is an overwrite, not an append.
+
+**Residual limitation:** if the admin secret is compromised *off-chain* (e.g.,
+leaked from the wallet that holds it), an attacker can call `registerIssuer`
+with their own key and begin issuing valid attestations.  There is no on-chain
+mechanism to change the admin commitment after deploy in Wave 1.  An
+`updateAdmin` circuit is a Wave 2 item.
 
 ---
 
