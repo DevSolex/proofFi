@@ -40,7 +40,6 @@ See `docs/known-limitations.md` for the full list. Key items:
 - **Admin caller-check is commit/reveal, not signature-based.** Robust but relies on admin secret remaining private. See `docs/known-limitations.md`.
 - **Key revocation does not retroactively invalidate prior attestations.** Attestations issued before a key revocation remain valid on-chain.
 - **Variant B: signature not verified in-circuit.** A modified wallet frontend can bypass the TS-side check. Variant A would eliminate this; it is documented as a Wave 2 improvement.
-- **ZK key generation disabled on this build machine.** The `--skip-zk` flag is used because the `zkir` binary requires AVX2 CPU instructions. The generated circuits are correct; proofs cannot be generated on this hardware. Proving keys should be generated on compatible hardware before mainnet deployment.
 
 ---
 

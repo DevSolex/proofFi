@@ -99,21 +99,80 @@ hardware that supports AVX2 for ZK key generation.
 
 ---
 
-## 6. ZK key generation is disabled on this build machine
+## 6. ZK proof generation — gap not yet closed
 
-The `zkir` binary (version 2.2.0) requires AVX2 CPU instructions.  The build
-machine has AVX but not AVX2 (`/proc/cpuinfo` confirms this).  Running `zkir`
-produces `Illegal instruction (core dumped)`.
+This was the single largest gap between "the logic is correct" and "this is a
+working ZK submission."
 
-All contract compilation uses `--skip-zk`, which generates the `.zkir` circuit
-files but omits the prover/verifier keys.
+### What has been tested
 
-**Impact:** ZK proofs cannot be generated on this hardware.  The circuits are
-correct (the compiler verifies circuit well-formedness independently of key
-generation), but deployment to Midnight Mainnet requires proving keys.
+All 28 unit tests and the 6-step smoke test pass.  Every test runs under
+`compact compile --skip-zk`.  This flag:
 
-**Fix:** generate keys on a machine with AVX2 (any post-2013 x86-64 server or
-CI runner typically qualifies) before mainnet deployment.
+- Compiles `.compact` source to circuit IR (`.zkir` files) ✅
+- Generates TypeScript bindings ✅
+- Validates circuit well-formedness (constraint system) ✅
+- **Skips** prover/verifier key generation ❌
+- **Skips** actual ZK proof generation and verification ❌
+
+The test suite therefore validates:
+- Circuit logic and constraint structure
+- Witness behaviour (all four circuits: `issueAttestation`, `verifyAttestation`,
+  `registerIssuer`, `revokeIssuer`)
+- Ledger state transitions
+- Issuer signing and tamper-detection in the TypeScript layer
+
+### What has NOT been tested
+
+- Proving keys generated without error from `.zkir` IR
+- Verifying keys generated without error
+- A real ZK proof generated for any of the four circuits
+- The full smoke test run against a non-`--skip-zk` build
+
+### Root cause
+
+**Development machine history:**
+
+1. The original build machine had an AVX-only CPU (no AVX2).  The `zkir`
+   binary (v2.2.0) requires AVX2 and crashed immediately:
+   ```
+   $ zkir compile credit-attestation.zkir credit-attestation.pk credit-attestation.vk
+   Compiling circuit "credit-attestation.zkir"
+   Illegal instruction (core dumped)
+   ```
+   CPU evidence from that machine:
+   ```
+   $ grep -o 'avx[^ ]*' /proc/cpuinfo | sort -u
+   avx
+   ```
+
+2. The current dev machine **does** have AVX2 (`grep -o 'avx[^ ]*' /proc/cpuinfo`
+   shows both `avx` and `avx2`), so the CPU constraint no longer applies.
+   However, the `compact` toolchain binary is not installed on this machine
+   (`which compact` returns nothing; `npm run compile:full` exits with
+   `sh: compact: not found`).
+
+In short: the hardware blocker has been resolved, but the toolchain has not
+been reinstalled.
+
+### Acceptance criteria for closing this gap
+
+1. Install the `compact` toolchain (v0.34.0) on a machine where it is
+   available (the current machine qualifies — it has AVX2).
+2. Run `npm run compile:full` (i.e., `compact` without `--skip-zk`) for
+   `credit-attestation.compact` and confirm prover/verifier keys are produced
+   for all four circuits without error.
+3. Run `npm run smoke-test` against the full build at least once.
+
+**Alternatively** (for CI verification):
+- Use a GitHub Actions runner (Ubuntu `ubuntu-latest` runners have AVX2) or
+  an AWS EC2 `c5` / `m5` instance (all have AVX2).
+- Install the toolchain in the runner and run steps 2–3 above.
+
+**Fix:** generate keys on any AVX2-capable machine with the toolchain
+installed — any post-2013 x86-64 server or standard CI runner qualifies —
+before mainnet deployment or public demo.  The current machine satisfies the
+CPU requirement; only a toolchain install is needed.
 
 ---
 
