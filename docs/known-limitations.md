@@ -6,25 +6,6 @@ each item is a real constraint on the current system.
 
 ---
 
-> ## ✅ ZK PROOF GENERATION — GAP CLOSED (2026-09-08)
->
-> The testing gap that previously appeared here has been resolved.
-> The compact toolchain (devtools v0.5.2 + compiler 0.34.0) was installed
-> on this machine using the official installer and a full `compact compile`
-> (without `--skip-zk`) completed successfully:
->
-> - All 4 circuits compiled to real prover/verifier keys (`.prover` / `.verifier`).
-> - Prover key sizes: issueAttestation 2.7 MB, registerIssuer 2.7 MB,
->   revokeIssuer 2.7 MB, verifyAttestation 152 KB.
-> - **28/28 unit tests pass** against the real build.
-> - **6/6 smoke test steps pass** against the real build.
->
-> The historical limitation text is preserved in **section 6** for reference.
-
----
-
----
-
 ## 1. Issuer honesty is out of scope
 
 The contract verifies that a balance payload was signed by a *registered* issuer.
@@ -118,10 +99,7 @@ hardware that supports AVX2 for ZK key generation.
 
 ---
 
-## 6. ZK proof generation — RESOLVED (2026-09-08)
-
-> **Status: closed.**  Full end-to-end ZK compilation was verified on
-> 2026-09-08.  The history is preserved below for reference.
+## 6. ZK proof generation — gap not yet closed
 
 This was the single largest gap between "the logic is correct" and "this is a
 working ZK submission."

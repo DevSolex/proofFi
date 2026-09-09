@@ -71,12 +71,6 @@ Two independent blockers apply:
 
 Building Variant A under these conditions would produce a contract that compiles but cannot have its proving keys verified in this environment. A working Variant B with full test coverage is a more honest deliverable.
 
-> **Post-Wave-1 note (2026-09-08):** Blocker 2 is resolved. The current dev machine
-> has AVX2 and the compact toolchain (devtools v0.5.2 + compiler 0.34.0) has been
-> installed. `compact compile` without `--skip-zk` completed successfully for all
-> four circuits; real prover/verifier keys were generated. Blocker 1 (constraint
-> cost) remains valid — Variant A is still a Wave 2 item on time-budget grounds.
-
 ---
 
 ## What Variant B means for this contract
