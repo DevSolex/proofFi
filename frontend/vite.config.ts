@@ -25,8 +25,13 @@ export default defineConfig({
   server: {
     port: 3000,
   },
+  // Suppress sourcemap warnings from third-party packages that don't ship sources
   build: {
-    outDir:  'dist',
-    target:  'esnext',   // required for top-level await + Wasm
+    outDir:       'dist',
+    target:       'esnext',
+    sourcemap:    false,
+  },
+  css: {
+    devSourcemap: false,
   },
 });
