@@ -1,10 +1,20 @@
-import { defineConfig } from 'vite';
+import { defineConfig, createLogger } from 'vite';
 import react from '@vitejs/plugin-react';
 import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
 import path from 'path';
 
+// Suppress "points to missing source files" warnings from third-party packages
+// that don't ship their original TypeScript sources (compact-runtime, etc.)
+const logger = createLogger();
+const originalWarn = logger.warn.bind(logger);
+logger.warn = (msg, options) => {
+  if (msg.includes('points to missing source files')) return;
+  originalWarn(msg, options);
+};
+
 export default defineConfig({
+  customLogger: logger,
   plugins: [
     react(),
     wasm(),
