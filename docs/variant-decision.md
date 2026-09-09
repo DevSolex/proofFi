@@ -27,6 +27,12 @@ secp256k1EcdsaVerify(
 
 ### 2. Constraint cost investigation
 
+> **Evidence quality: INFERRED, not measured.**  
+> `zkir` never completed on this machine (see §3 below), so no actual constraint
+> count for `secp256k1EcdsaVerify` was ever observed. The figures below are
+> derived from published benchmarks and comparable circuit sizes — not from
+> running the compiler against a `secp256k1EcdsaVerify` call on this hardware.
+
 `secp256k1EcdsaVerify` performs elliptic-curve point multiplication in-circuit. The OpenZeppelin Compact contracts sample output shows:
 
 ```
@@ -34,7 +40,12 @@ circuit "transfer" (k=13, rows=3990)
 circuit "approve"  (k=13, rows=3075)
 ```
 
-These are *token transfer* circuits without EC crypto. An in-circuit ECDSA verify for secp256k1 typically requires k=18 and rows on the order of 50,000–100,000. This is consistent with what the release notes describe as "constraint cost" and matches the Groth16 benchmark data for secp256k1 ECDSA.
+These are *token transfer* circuits without EC crypto. Based on published Groth16
+benchmarks for secp256k1 ECDSA and the general cost of in-circuit EC point
+multiplication, an in-circuit ECDSA verify is expected to require k=18 and rows
+on the order of 50,000–100,000. This expectation was not verified by actually
+compiling a circuit that calls `secp256k1EcdsaVerify` — that would require a
+machine with AVX2 to complete the `zkir` step.
 
 ### 3. Hardware limitation
 
@@ -66,8 +77,12 @@ The spec's decision rule:
 > *"Primitive doesn't exist, doesn't compile, or constraint cost would consume the rest of the Wave → build Variant B"*
 
 Two independent blockers apply:
-1. The constraint cost of in-circuit secp256k1 ECDSA would consume the Wave 1 time budget.
-2. ZK key generation is physically impossible on this hardware (no AVX2).
+1. The constraint cost of in-circuit secp256k1 ECDSA would consume the Wave 1 time budget. *(inferred from published benchmarks — not directly measured on this hardware; see §2 above)*
+2. ZK key generation is physically impossible on this hardware (no AVX2). *(directly measured — SIGILL confirmed)*
+
+Blocker (2) alone is sufficient to justify Variant B. Blocker (1) is supporting
+context based on published data, not an independently measured result from this
+build environment.
 
 Building Variant A under these conditions would produce a contract that compiles but cannot have its proving keys verified in this environment. A working Variant B with full test coverage is a more honest deliverable.
 
