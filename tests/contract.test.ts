@@ -308,7 +308,7 @@ describe('tier ordering: verifyAttestation circuit on real compiled contract (is
 
   // ── boundary tests ─────────────────────────────────────────────────────────
 
-  it('NONE tier (0): fails every minTier check including NONE', async () => {
+  it('NONE tier (0): passes minTier=NONE only, fails BRONZE/SILVER/GOLD', async () => {
     const { contract, stateAfterIssue, coinPubKey, onChainCommitment } =
       await deployWithAttestation(TIER.NONE);
     // NONE >= NONE is true — a NONE attestation satisfies minTier=NONE
