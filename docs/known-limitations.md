@@ -50,6 +50,71 @@ requires off-chain indexing — or (b) including an issuer-revocation epoch
 in the attestation record and checking it at `verifyAttestation` time, which
 complicates the circuit.  This is deferred to Wave 2.
 
+### Wave 2 approach sketch
+
+Store a per-issuer revocation timestamp alongside the existing `trustedIssuers`
+map.  Update `verifyAttestation` to reject attestations issued on or after the
+revocation timestamp, while keeping attestations issued before it valid.
+
+```compact
+// New ledger field (Wave 2)
+export ledger issuerRevokedAt: Map<Bytes<32>, Uint<64>>;
+
+// Updated revokeIssuer (Wave 2)
+export circuit revokeIssuer(issuerKeyId: Bytes<32>): [] {
+  // ... existing admin auth check unchanged ...
+  trustedIssuers.insert(disclose(issuerKeyId), disclose(false));
+  // Record the block time at which revocation occurred
+  // blockTime is not directly readable in Compact; pass as a disclosed
+  // parameter supplied by the caller and validated by the circuit.
+  // Alternatively, use a Counter-based epoch rather than a wall-clock time.
+  issuerRevokedAt.insert(disclose(issuerKeyId), disclose(revocationTimestamp));
+}
+
+// Updated verifyAttestation (Wave 2)
+export circuit verifyAttestation(commitment: Bytes<32>, minTier: Uint<8>): Boolean {
+  const disclosedCommitment: Bytes<32> = disclose(commitment);
+  if (!attestations.member(disclosedCommitment)) { return false; }
+  const record = attestations.lookup(disclosedCommitment);
+  // If the issuer was revoked, only trust attestations issued before revocation
+  const issuerKey: Bytes<32> = disclose(record.issuer);
+  if (issuerRevokedAt.member(issuerKey)) {
+    const revokedAt = issuerRevokedAt.lookup(issuerKey);
+    if (disclose(record.issuedAt >= revokedAt)) { return false; }
+  }
+  return disclose(record.tier >= minTier);
+}
+```
+
+**What this achieves:** an attestation issued at `t=100` under a key revoked at
+`t=200` remains valid.  An attestation issued at `t=200` or later under that
+key is invalidated — bounding the window of compromise to the time between
+key compromise and revocation.
+
+### Privacy implications of storing `revokedAt` on-chain
+
+`issuerRevokedAt` is a public ledger field.  Storing it has the following
+observable consequences:
+
+1. **Revocation timestamp is public.** Anyone can see exactly when an issuer
+   key was revoked.  If revocations correlate with external events (e.g., a
+   security incident, a regulatory action), the timestamp leaks timing
+   information about those events.
+
+2. **Attestation validity becomes time-queryable.** A third party who knows
+   an attestation's `issuedAt` value (visible in the `attestations` map) can
+   determine whether it predates or postdates a revocation — potentially
+   narrowing the window in which a wallet's activity can be inferred.
+
+3. **Issuer key-ids are already public** (they appear in `trustedIssuers` and
+   in every `Attestation` record), so storing `revokedAt` does not leak
+   additional identity information beyond what is already observable.
+
+**Mitigation options for Wave 2:** use a Counter-based epoch instead of a
+wall-clock timestamp to reduce the correlation surface; or commit to a hash of
+the revocation timestamp rather than the timestamp itself (though this makes
+the circuit-side comparison more expensive).
+
 ---
 
 ## 4. Admin authentication uses commit/reveal, not an independent signature
