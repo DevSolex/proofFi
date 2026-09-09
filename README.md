@@ -105,7 +105,59 @@ The smoke test (`tests/smoke-test.ts`) runs all six steps uninterrupted and exit
 
 ---
 
-## Wave 2 Non-Goals (named, not built)
+## Frontend — Test Harness UI
+
+A clickable smoke test UI that makes the six steps in §6 observable in a browser.
+This is a **test harness, not a consumer product** — its job is to show circuit calls
+and ledger state changes in real time for judges and teammates.
+
+### Running the frontend locally
+
+Prerequisites: Node.js 22+, contract compiled (`npm run compile` from repo root).
+
+```bash
+cd frontend
+npm install
+
+# Start the dev server (runs against --skip-zk output by default)
+npm run dev
+# Open http://localhost:3000
+```
+
+The app will show a persistent **⚠️ skip-zk banner** unless `VITE_BUILD_MODE=full-zk`
+is set (requires a real `compact compile` without `--skip-zk`):
+
+```bash
+VITE_BUILD_MODE=full-zk npm run dev
+```
+
+### Running the Playwright e2e smoke test
+
+```bash
+cd frontend
+npx playwright install chromium  # first time only
+npm run test:e2e
+```
+
+The Playwright test scripts all six smoke-test steps through actual UI clicks
+(no direct circuit calls) and lives in `frontend/tests/smoke.spec.ts`.
+
+### What the frontend does NOT show
+
+- Raw balance values — the `avgBalance` field never appears on screen at any
+  point, including developer-facing debug views. After `issueAttestation`,
+  the UI shows tier, commitment, issuer key-id, and timestamp only.
+- ZK proof details when running under `--skip-zk` — the banner makes this
+  explicit. The circuit logic and ledger transitions are still exercised.
+
+### Out of scope (Wave 1)
+
+- Multi-wallet support beyond Lace (Lace is the target; other wallets will be
+  detected if present but not specifically tested).
+- Mobile responsiveness, production deployment, design polish.
+- Real bank/exchange integration (issuer service stays mocked).
+
+---
 
 - Live bank/exchange API integration
 - Multi-issuer aggregation
