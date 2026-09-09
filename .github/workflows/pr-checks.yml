@@ -1,0 +1,121 @@
+name: PR Checks — full ZK compile + tests
+
+# Runs on every pull request to master/main.
+# Ensures no PR can silently regress to --skip-zk-only behaviour.
+#
+# Dependency: issue #1 resolved — AVX2 confirmed on GitHub Actions ubuntu-latest
+# runners (CI run #34294924604, 2026-09-09, all steps ✅).
+#
+# Toolchain: compact devtools v0.5.2 + compactc 0.34.0 (language 0.26.0)
+# Cached between runs using actions/cache on ~/.compact to avoid repeated
+# downloads (~10MB binary).
+
+on:
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  pr-checks:
+    name: Compile (no --skip-zk) + unit tests + smoke test
+    runs-on: ubuntu-latest     # AVX2 confirmed on all GitHub-hosted runners
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify AVX2 support
+        run: |
+          echo "CPU flags (avx* only):"
+          grep -o 'avx[^ ]*' /proc/cpuinfo | sort -u
+          grep -q 'avx2' /proc/cpuinfo \
+            && echo "✅ AVX2 confirmed — zkir will run" \
+            || (echo "❌ AVX2 not found — zkir will SIGILL" && exit 1)
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # ── Compact toolchain install with caching ──────────────────────────────
+      # Cache key: OS + pinned devtools version + pinned compiler version.
+      # If either version changes, the cache is invalidated and reinstalled.
+      - name: Cache compact toolchain
+        id: cache-compact
+        uses: actions/cache@v4
+        with:
+          path: ~/.compact
+          key: compact-${{ runner.os }}-devtools-0.5.2-compiler-0.34.0
+
+      - name: Install compact devtools CLI (if not cached)
+        if: steps.cache-compact.outputs.cache-hit != 'true'
+        run: |
+          echo "Cache miss — installing compact devtools v0.5.2..."
+          curl -fsSL https://github.com/midnightntwrk/compact/releases/download/compact-v0.5.2/compact-installer.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Add compact to PATH (if cached)
+        if: steps.cache-compact.outputs.cache-hit == 'true'
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install compact compiler v0.34.0 (if not cached)
+        if: steps.cache-compact.outputs.cache-hit != 'true'
+        run: |
+          compact update 0.34.0
+          echo "Installed compiler version:"
+          compact compile --version
+
+      - name: Confirm compact version (cache hit)
+        if: steps.cache-compact.outputs.cache-hit == 'true'
+        run: |
+          echo "Using cached toolchain:"
+          compact compile --version
+
+      # ── Build ───────────────────────────────────────────────────────────────
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Generate issuer keypair
+        run: npm run issuer:generate
+
+      - name: Compile contract WITHOUT --skip-zk (full ZK key generation)
+        run: |
+          echo "▶ compact compile (no --skip-zk) — this generates real .prover/.verifier keys"
+          npm run compile:full
+          echo "Generated artefacts:"
+          find contract/managed -type f | sort
+
+      - name: Assert prover/verifier keys exist for all 4 circuits
+        run: |
+          PROVER_COUNT=$(find contract/managed -name '*.prover' | wc -l)
+          VERIFIER_COUNT=$(find contract/managed -name '*.verifier' | wc -l)
+          echo "Prover keys:   $PROVER_COUNT"
+          echo "Verifier keys: $VERIFIER_COUNT"
+          [ "$PROVER_COUNT" -ge 4 ] \
+            || (echo "❌ Expected ≥4 .prover files, found $PROVER_COUNT" && exit 1)
+          [ "$VERIFIER_COUNT" -ge 4 ] \
+            || (echo "❌ Expected ≥4 .verifier files, found $VERIFIER_COUNT" && exit 1)
+          echo "✅ Key artefacts confirmed for all 4 circuits"
+          echo ""
+          echo "Key sizes:"
+          ls -lh contract/managed/credit-attestation/keys/ 2>/dev/null || true
+
+      # ── Tests ───────────────────────────────────────────────────────────────
+      - name: Run unit tests (npm test)
+        run: npm test
+
+      - name: Run smoke test (6-step end-to-end)
+        run: npm run smoke-test
+
+      # ── Summary ─────────────────────────────────────────────────────────────
+      - name: Print pass summary
+        run: |
+          echo ""
+          echo "═══════════════════════════════════════════"
+          echo "  ✅ All PR checks passed"
+          echo "  - AVX2 confirmed"
+          echo "  - compact compile (no --skip-zk) succeeded"
+          echo "  - Prover/verifier keys generated for 4 circuits"
+          echo "  - Unit tests passed"
+          echo "  - Smoke test passed (6/6 steps)"
+          echo "═══════════════════════════════════════════"
