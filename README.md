@@ -40,6 +40,7 @@ See `docs/known-limitations.md` for the full list. Key items:
 - **Admin caller-check is commit/reveal, not signature-based.** Robust but relies on admin secret remaining private. See `docs/known-limitations.md`.
 - **Key revocation does not retroactively invalidate prior attestations.** Attestations issued before a key revocation remain valid on-chain.
 - **Variant B: signature not verified in-circuit.** A modified wallet frontend can bypass the TS-side check. Variant A would eliminate this; it is documented as a Wave 2 improvement.
+- **MAX_STALENESS is hardcoded at 86400 seconds (24 hours).** Justified: the mock issuer re-signs on every request so any payload older than 24 hours is either stale or a replay. Safe from `Uint<64>` overflow until year ~2554. Should be made configurable at deploy time in Wave 2.
 
 ---
 

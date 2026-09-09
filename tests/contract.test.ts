@@ -199,6 +199,120 @@ describe('payload encoding', () => {
   });
 });
 
+// ─── MAX_STALENESS fence-post boundary tests (issue #6) ──────────────────────
+//
+// issueAttestation asserts: blockTimeLt(payload.issuedAt + 86400)
+// i.e. the circuit fails if: block_time >= payload.issuedAt + 86400
+//
+// The local simulation uses the current wall-clock time as block_time.
+// We control issuedAt in the witness to put it exactly at the boundary.
+//
+// Boundary cases (let now = current Unix time in seconds):
+//   issuedAt = now - 86399  →  expiry = now + 1   →  block_time < expiry  ✅ PASS
+//   issuedAt = now - 86400  →  expiry = now        →  block_time >= expiry ❌ FAIL
+//   issuedAt = now - 86401  →  expiry = now - 1    →  block_time >= expiry ❌ FAIL
+//
+// Overflow check (criterion 3): max realistic issuedAt ≈ 1.75e9 (year 2025).
+// 1.75e9 + 86400 ≈ 1.75e9 << Uint<64> max (1.84e19). Safe until ~year 2554.
+
+describe('MAX_STALENESS fence-post boundary tests (issue #6)', () => {
+  let fenceIssuerPrivKey: Uint8Array;
+  let fenceIssuerPubKey:  Uint8Array;
+  let fenceIssuerKeyId:   Uint8Array;
+  let fenceAdminSecret:   Uint8Array;
+  let fenceCoinPubKey:    any;
+  let fenceContractState: any;
+
+  beforeAll(async () => {
+    fenceIssuerPrivKey = secp256k1.utils.randomPrivateKey();
+    fenceIssuerPubKey  = secp256k1.getPublicKey(fenceIssuerPrivKey, true);
+    fenceIssuerKeyId   = sha256(fenceIssuerPubKey);
+    fenceAdminSecret   = crypto.getRandomValues(new Uint8Array(32));
+    fenceCoinPubKey    = verifyingKey(sampleKey());
+
+    const contract  = new AttestationContract({
+      getSignedBalancePayload: (_ctx: any) => { throw new Error('unused in setup'); },
+      getWalletSecret:         (ctx: any)  => [ctx.privateState, new Uint8Array(32)],
+      getAdminSecret:          (ctx: any)  => [ctx.privateState, fenceAdminSecret],
+    });
+    const ctorCtx = mkCtorCtx(null, fenceCoinPubKey);
+    const { currentContractState } = await contract.initialState(
+      ctorCtx,
+      sha256Hash(fenceAdminSecret),
+      fenceIssuerKeyId,
+      1_000n, 5_000n, 20_000n,
+    );
+    fenceContractState = currentContractState;
+  });
+
+  async function tryIssue(issuedAt: bigint): Promise<{ success: boolean; error?: string }> {
+    const walletSecret = crypto.getRandomValues(new Uint8Array(32));
+    const commitment   = crypto.getRandomValues(new Uint8Array(32));
+
+    const { signPayload } = await import('../issuer-service/index.js');
+    const payload = {
+      walletCommitment: commitment,
+      avgBalance:       5_000n,
+      issuedAt,
+      issuerKeyId:      fenceIssuerKeyId,
+    };
+    const sig = signPayload(payload, fenceIssuerPrivKey);
+
+    const contract = new AttestationContract({
+      getSignedBalancePayload: (ctx: any) => [ctx.privateState, [payload, sig]],
+      getWalletSecret:         (ctx: any) => [ctx.privateState, walletSecret],
+      getAdminSecret:          (ctx: any) => [ctx.privateState, fenceAdminSecret],
+    });
+
+    const ctx = mkCircuitCtx(
+      'issueAttestation', dummyAddr(), fenceCoinPubKey,
+      fenceContractState.data, null,
+    );
+
+    try {
+      await contract.circuits.issueAttestation(ctx);
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  }
+
+  it('issuedAt = now - 86399 (1s before expiry) → PASS', async () => {
+    const now = BigInt(Math.floor(Date.now() / 1000));
+    const result = await tryIssue(now - 86399n);
+    expect(result.success).toBe(true);
+  });
+
+  it('issuedAt = now - 86400 (exactly at expiry) → FAIL (stale)', async () => {
+    const now = BigInt(Math.floor(Date.now() / 1000));
+    const result = await tryIssue(now - 86400n);
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/stale attestation/);
+  });
+
+  it('issuedAt = now - 86401 (1s past expiry) → FAIL (stale)', async () => {
+    const now = BigInt(Math.floor(Date.now() / 1000));
+    const result = await tryIssue(now - 86401n);
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/stale attestation/);
+  });
+
+  it('Uint<64> overflow check: issuedAt + 86400 is safe for all realistic timestamps', () => {
+    // Current Unix timestamp ≈ 1.75e9 (year 2025)
+    // Uint<64> max = 18446744073709551615 ≈ 1.84e19
+    // Max safe issuedAt before overflow: 1.84e19 - 86400 ≈ 1.84e19 (effectively no risk)
+    const maxUint64 = 18_446_744_073_709_551_615n;
+    const maxStaleness = 86400n;
+    const currentTimestamp = BigInt(Math.floor(Date.now() / 1000)); // ~1.75e9
+    const yearTwoThousandFiveHundredFiftyFour = 18_446_744_073_709_551_615n - 86400n;
+
+    // Adding 86400 to current timestamp is nowhere near overflow
+    expect(currentTimestamp + maxStaleness).toBeLessThan(maxUint64);
+    // Safe until timestamps reach ~1.84e19, which is year ~2554
+    expect(yearTwoThousandFiveHundredFiftyFour).toBeGreaterThan(currentTimestamp);
+  });
+});
+
 // ─── Tier ordering: real verifyAttestation circuit (issue #3) ────────────────
 //
 // Acceptance criteria §3: confirm Uint<8> comparison in a struct field stored

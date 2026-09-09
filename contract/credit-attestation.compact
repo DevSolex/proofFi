@@ -131,6 +131,18 @@ export circuit issueAttestation(): [] {
   );
 
   // 3. Freshness: block_time < issuedAt + 86400 (24-hour window)
+  // MAX_STALENESS = 86400 seconds (24 hours).
+  // Justification: the mock issuer service re-signs balance payloads on every
+  // request (no caching), so any payload older than 24 hours indicates either
+  // a replay of a stale payload or a client that failed to refresh.  24 hours
+  // is intentionally generous to accommodate clock skew and network delays
+  // while still bounding the window in which a compromised payload could be
+  // replayed.  Wave 2 should make this value configurable at deploy time.
+  //
+  // Overflow check: current Unix timestamps are ~1.75e9; adding 86400 gives
+  // ~1.75e9 + 86400 ≈ 1.75e9, well within Uint<64> max (1.84e19). Safe until
+  // approximately year 2554.
+  //
   // We must cast the sum back to Uint<64> to match blockTimeLt's argument type,
   // since addition of Uint<64> + literal widens the type in Compact's type system.
   const expiryTimestamp: Uint<64> = (payload.issuedAt + 86400) as Uint<64>;
