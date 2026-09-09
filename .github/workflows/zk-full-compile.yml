@@ -14,7 +14,7 @@ name: ZK Full Compile (AVX2 key generation)
 on:
   workflow_dispatch:          # trigger manually from the Actions tab
   push:
-    branches: [main]
+    branches: [master, main]  # repo default branch is master; main kept for safety
     paths:
       - 'contract/**'         # re-run whenever contract source changes
 
