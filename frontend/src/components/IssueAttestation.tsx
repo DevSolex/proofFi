@@ -7,8 +7,7 @@
  */
 
 import { useState } from 'react';
-import { issueAttestation, getCurrentIssuerKeyId } from '../lib/contract.js';
-import { FIXTURE_WALLETS } from '../../../issuer-service/sample-data.js';
+import { issueAttestation, getCurrentIssuerKeyId, FIXTURE_WALLETS } from '../lib/contract.js';
 import type { AttestationRecord } from '../types/index.js';
 import { TIER_LABELS } from '../types/index.js';
 
@@ -19,7 +18,7 @@ interface Props {
 }
 
 export function IssueAttestation({ disabled, onIssued, onFailed }: Props) {
-  const [selectedWallet, setSelectedWallet] = useState(FIXTURE_WALLETS[0].walletId);
+  const [selectedWallet, setSelectedWallet] = useState<string>(FIXTURE_WALLETS[0].walletId);
   const [useUnregistered, setUseUnregistered] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result,  setResult]  = useState<AttestationRecord | null>(null);

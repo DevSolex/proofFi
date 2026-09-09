@@ -29,10 +29,26 @@ import {
 } from '@midnight-ntwrk/compact-runtime';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — relative path to monorepo sibling
-import { issuePayload } from '../../issuer-service/index.js';
-// @ts-ignore
-import { FIXTURE_WALLETS, THRESHOLDS } from '../../issuer-service/sample-data.js';
+import { issuePayload, getIssuerKeyId } from './issuerCompat.js';
+
+// Fixture wallet data — inline the relevant subset to avoid Node.js imports
+const FIXTURE_WALLETS = [
+  { walletId: 'wallet-alice-broke',      avgBalance:    347n, expectedTier: 'NONE'   },
+  { walletId: 'wallet-bob-sparse',       avgBalance:    999n, expectedTier: 'NONE'   },
+  { walletId: 'wallet-carol-bronze',     avgBalance:  1_000n, expectedTier: 'BRONZE' },
+  { walletId: 'wallet-dave-bronze-mid',  avgBalance:  3_421n, expectedTier: 'BRONZE' },
+  { walletId: 'wallet-eve-silver',       avgBalance:  7_813n, expectedTier: 'SILVER' },
+  { walletId: 'wallet-frank-silver-high',avgBalance: 19_999n, expectedTier: 'SILVER' },
+  { walletId: 'wallet-grace-gold',       avgBalance: 20_000n, expectedTier: 'GOLD'   },
+  { walletId: 'wallet-heidi-gold-rich',  avgBalance:142_857n, expectedTier: 'GOLD'   },
+] as const;
+
+const THRESHOLDS = { bronzeMin: 1_000n, silverMin: 5_000n, goldMin: 20_000n };
+
+export { FIXTURE_WALLETS };
+
 import type { AttestationRecord, TierValue } from '../types/index.js';
+
 
 // ─── Module state (single deployed instance per session) ──────────────────────
 
@@ -58,7 +74,7 @@ export async function initContract(): Promise<{
 }> {
   _issuerPrivKey = secp256k1.utils.randomPrivateKey();
   _issuerPubKey  = secp256k1.getPublicKey(_issuerPrivKey, true);
-  _issuerKeyId   = sha256(_issuerPubKey);
+  _issuerKeyId   = getIssuerKeyId(_issuerPrivKey);
   _adminSecret   = crypto.getRandomValues(new Uint8Array(32));
   const adminCommit = sha256(_adminSecret);
 
