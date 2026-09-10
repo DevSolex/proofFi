@@ -21,7 +21,7 @@ import type { WalletInfo } from '../types/index.js';
 // Network ID — use 'testnet-02' for Lace on testnet, 'undeployed' for local node.
 // Wave 1 smoke test uses the local simulation API (no wallet needed for circuit calls).
 // Wallet connection here is for display/demo purposes only.
-export const NETWORK_ID = 'testnet';
+export const NETWORK_ID = 'undeployed';
 
 export function discoverWallets(): WalletInfo[] {
   if (typeof window === 'undefined' || !window.midnight) return [];

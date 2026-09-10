@@ -12,7 +12,8 @@
 
 import type { AttestationRecord, TierValue } from '../types/index.js';
 
-const API = (import.meta as any).env?.VITE_API_URL ?? 'http://localhost:3001';
+// All API calls go through the Vite proxy (/api/*) to avoid CORS and extension interference
+const API = '/api';
 
 async function api<T>(path: string, body?: object): Promise<T> {
   const res = await fetch(`${API}${path}`, {
