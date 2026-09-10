@@ -22,8 +22,9 @@ export function AdminPanel({ disabled, onAction }: Props) {
   const [unlocked,      setUnlocked]      = useState(false);
 
   // For convenience, pre-fill the current session issuer key-id
-  function prefillCurrentIssuer() {
-    setIssuerKeyId(getCurrentIssuerKeyId());
+  async function prefillCurrentIssuer() {
+    const keyId = await getCurrentIssuerKeyId();
+    setIssuerKeyId(keyId);
   }
 
   function unlock() {
