@@ -63,7 +63,7 @@ export function WalletConnect({ onConnected }: Props) {
 
   return (
     <section data-testid="wallet-connect" style={styles.section}>
-      <h2 style={styles.h2}>Wallet Connection</h2>
+      <h2 style={styles.h2}>Wallet Connection <span style={{ fontSize:'11px', color:'#555', fontWeight:'normal', textTransform:'none' }}>(optional — smoke test works without it)</span></h2>
 
       {state.status === 'not-detected' && (
         <div data-testid="wallet-state-not-detected" style={styles.stateBox}>
