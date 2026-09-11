@@ -231,8 +231,8 @@ app.post('/revokeIssuer', async (req, res) => {
   }
 });
 
-// GET /ledger
-app.get('/ledger', (_req, res) => {
+// GET or POST /ledger
+app.all('/ledger', (_req, res) => {
   if (!_contractState) return res.json({ ok: false, error: 'Not deployed.' });
   try {
     const state = ledger(_contractState.data);
@@ -248,8 +248,8 @@ app.get('/ledger', (_req, res) => {
   }
 });
 
-// GET /issuerKeyId
-app.get('/issuerKeyId', (_req, res) => {
+// GET or POST /issuerKeyId
+app.all('/issuerKeyId', (_req, res) => {
   res.json({ ok: true, issuerKeyId: _issuerKeyId ? Buffer.from(_issuerKeyId).toString('hex') : null });
 });
 

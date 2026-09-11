@@ -16,11 +16,9 @@ const API = 'http://localhost:3001';
 
 async function api<T>(path: string, body?: object): Promise<T> {
   const res = await fetch(`${API}${path}`, {
-    method:  body ? 'POST' : 'GET',
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body:    body ? JSON.stringify(body, (_k, v) =>
-      typeof v === 'bigint' ? v.toString() : v
-    ) : undefined,
+    method:  'POST',   // always POST — all simulation endpoints require POST
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(body ?? {}),
   });
   const data = await res.json();
   if (!data.ok) throw new Error(data.error ?? 'API error');
@@ -114,7 +112,6 @@ export async function getLedgerState() {
 }
 
 export async function getCurrentIssuerKeyId(): Promise<string> {
-  const res = await fetch(`${API}/issuerKeyId`);
-  const d   = await res.json();
+  const d: any = await api('/issuerKeyId');
   return d.issuerKeyId ?? '';
 }
