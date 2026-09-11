@@ -16,10 +16,10 @@ export default defineConfig({
     port: 3000,
     host: '0.0.0.0',   // bind to all interfaces including ::1 (IPv6 localhost)
     proxy: {
-      '/api': {
+      '/__sim': {
         target:       'http://localhost:3001',
         changeOrigin: true,
-        rewrite:      (path) => path.replace(/^\/api/, ''),
+        rewrite:      (path) => path.replace(/^\/__sim/, ''),
       },
     },
   },

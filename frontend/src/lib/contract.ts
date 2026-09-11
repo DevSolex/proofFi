@@ -12,8 +12,7 @@
 
 import type { AttestationRecord, TierValue } from '../types/index.js';
 
-// All API calls go through the Vite proxy (/api/*) to avoid CORS and extension interference
-const API = '/api';
+const API = '/__sim';
 
 async function api<T>(path: string, body?: object): Promise<T> {
   const res = await fetch(`${API}${path}`, {
