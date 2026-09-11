@@ -14,6 +14,8 @@
 
 import express from 'express';
 import cors    from 'cors';
+import path    from 'path';
+import { fileURLToPath } from 'url';
 import { sha256 }    from '@noble/hashes/sha256';
 import { secp256k1 } from '@noble/curves/secp256k1';
 import {
@@ -28,9 +30,18 @@ import {
   signatureVerifyingKey,
 } from '@midnight-ntwrk/compact-runtime';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DIST_DIR  = path.resolve(__dirname, '../dist');
+
 const app  = express();
 
-// Explicit CORS — allow all origins for local dev
+// CORS for local dev
+app.use(cors());
+
+// Serve compiled frontend static files
+app.use(express.static(DIST_DIR));
+
+// Explicit CORS headers for API routes
 app.use((_req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -253,9 +264,16 @@ app.all('/issuerKeyId', (_req, res) => {
   res.json({ ok: true, issuerKeyId: _issuerKeyId ? Buffer.from(_issuerKeyId).toString('hex') : null });
 });
 
+// ─── Catch-all: serve React frontend for all non-API routes ──────────────────
+app.get('/{*path}', (_req, res) => {
+  res.sendFile(path.join(DIST_DIR, 'index.html'));
+});
+
 // ─── Start ───────────────────────────────────────────────────────────────────
 
-const PORT = Number(process.env.API_PORT ?? 3001);
+const PORT = Number(process.env.PORT ?? process.env.API_PORT ?? 3001);
 app.listen(PORT, () => {
-  console.log(`ProofFi simulation API running on http://localhost:${PORT}`);
+  console.log(`ProofFi server running on http://localhost:${PORT}`);
+  console.log(`  API:      http://localhost:${PORT}/health`);
+  console.log(`  Frontend: http://localhost:${PORT}/`);
 });

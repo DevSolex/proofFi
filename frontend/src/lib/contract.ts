@@ -12,7 +12,10 @@
 
 import type { AttestationRecord, TierValue } from '../types/index.js';
 
-const API = 'http://localhost:3001';
+// In production the API is served from the same origin as the frontend.
+// In local dev the API runs on port 3001.
+const IS_DEV = (import.meta as any).env?.DEV === true;
+const API    = IS_DEV ? 'http://localhost:3001' : '';
 
 async function api<T>(path: string, body?: object): Promise<T> {
   const res = await fetch(`${API}${path}`, {
