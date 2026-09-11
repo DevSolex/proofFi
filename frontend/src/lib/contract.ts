@@ -12,7 +12,7 @@
 
 import type { AttestationRecord, TierValue } from '../types/index.js';
 
-const API = '/__sim';
+const API = 'http://localhost:3001';
 
 async function api<T>(path: string, body?: object): Promise<T> {
   const res = await fetch(`${API}${path}`, {
