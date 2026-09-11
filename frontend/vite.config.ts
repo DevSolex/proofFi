@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@contract': path.resolve(__dirname, '../contract/managed/credit-attestation/contract'),
+      '@contract': path.resolve(__dirname, 'contract/managed/credit-attestation/contract'),
       '@issuer':   path.resolve(__dirname, '../issuer-service'),
     },
   },

@@ -21,7 +21,7 @@ import { secp256k1 } from '@noble/curves/secp256k1';
 import {
   Contract,
   ledger,
-} from '../../contract/managed/credit-attestation/contract/index.js';
+} from '../contract/managed/credit-attestation/contract/index.js';
 import {
   createConstructorContext,
   createCircuitContext,
