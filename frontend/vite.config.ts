@@ -14,6 +14,7 @@ export default defineConfig({
   // This avoids CORS issues and extension interference with direct localhost:3001 calls
   server: {
     port: 3000,
+    host: '0.0.0.0',   // bind to all interfaces including ::1 (IPv6 localhost)
     proxy: {
       '/api': {
         target:       'http://localhost:3001',
