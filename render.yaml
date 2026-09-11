@@ -1,0 +1,15 @@
+# Render deployment configuration
+# https://render.com/docs/render-yaml
+
+services:
+  - type: web
+    name: prooffi
+    runtime: node
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    startCommand: npx tsx server/api.ts
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: VITE_BUILD_MODE
+        value: full-zk
