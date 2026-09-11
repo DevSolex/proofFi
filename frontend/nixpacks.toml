@@ -2,4 +2,4 @@
 cmds = ["npm install", "npm run build"]
 
 [start]
-cmd = "npx tsx server/api.ts"
+cmd = "NODE_PATH=./node_modules npx tsx server/api.ts"

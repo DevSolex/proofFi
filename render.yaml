@@ -7,7 +7,7 @@ services:
     runtime: node
     rootDir: frontend
     buildCommand: npm install && npm run build
-    startCommand: npx tsx server/api.ts
+    startCommand: NODE_PATH=./node_modules npx tsx server/api.ts
     envVars:
       - key: NODE_VERSION
         value: 22
